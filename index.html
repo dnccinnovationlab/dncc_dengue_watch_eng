@@ -324,16 +324,29 @@
   <section class="block" id="trend">
     <div class="block-head">
       <div>
-        <h2 class="block-title" data-bn>সাপ্তাহিক প্রবণতা</h2>
-        <h2 class="block-title" data-en>Weekly trend</h2>
-        <p class="block-desc" data-bn>২০২৪ সাল থেকে সিটিওয়াইড সাপ্তাহিক মোট রোগীর সংখ্যা।</p>
-        <p class="block-desc" data-en>Citywide weekly total patients since 2024.</p>
+        <h2 class="block-title" data-bn>প্রবণতা</h2>
+        <h2 class="block-title" data-en>Trend</h2>
+        <p class="block-desc" data-bn>DGHS দৈনিক তথ্য থেকে সিটিওয়াইড প্রবণতা — সময়কাল ও নির্দেশক বেছে নিন।</p>
+        <p class="block-desc" data-en>Citywide trend from DGHS daily data — pick a time granularity and metric.</p>
       </div>
+      <span class="source-tag">Source: DGHS</span>
     </div>
     <div class="trend-card">
+      <div class="map-controls" style="border:none;padding:0 0 16px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div class="lang-toggle" id="granToggle">
+          <button data-g="daily" class="active"><span data-bn>দৈনিক</span><span data-en>Daily</span></button>
+          <button data-g="weekly"><span data-bn>সাপ্তাহিক</span><span data-en>Weekly</span></button>
+          <button data-g="monthly"><span data-bn>মাসিক</span><span data-en>Monthly</span></button>
+          <button data-g="yearly"><span data-bn>বার্ষিক</span><span data-en>Yearly</span></button>
+        </div>
+        <div class="lang-toggle" id="metricToggle">
+          <button data-m="patients" class="active"><span data-bn>রোগী</span><span data-en>Patients</span></button>
+          <button data-m="deaths"><span data-bn>মৃত্যু</span><span data-en>Deaths</span></button>
+        </div>
+      </div>
       <div id="trendChart"><div class="state-msg" data-bn>প্রস্তুত হচ্ছে…</div></div>
       <div class="chart-caption">
-        <span data-bn>উৎস: সাপ্তাহিক ওয়ার্ড-ভিত্তিক আউটপুট শীট</span><span data-en>Source: weekly ward-level output sheet</span>
+        <span data-bn>উৎস: DGHS দৈনিক প্রতিবেদন</span><span data-en>Source: DGHS daily report</span>
         <span id="trendRange">—</span>
       </div>
     </div>
@@ -440,6 +453,9 @@ function fmtPct(v){ if(v===null||!isFinite(v)) return '—'; const s = v>=0?'▲
 let wardMapLatest = [];
 let wardLeaflet = null;
 let wardCentroids = {};
+let dghsDailySeries = [];
+let currentGranularity = 'daily';
+let currentMetric = 'patients';
 
 /* ---------------- LOAD WARD RISK SHEET ---------------- */
 async function loadWardRisk(){
@@ -456,10 +472,7 @@ async function loadWardRisk(){
   renderWardGrid(wardMapLatest);
   renderHotspots(wardMapLatest);
   renderRankList(wardMapLatest);
-  renderTrend(records);
   document.getElementById('mapAsOf').innerText = latestDate;
-  document.getElementById('asofLine').innerHTML =
-    `<span data-bn>সর্বশেষ হালনাগাদ:</span><span data-en>Last updated:</span> ${latestDate}`;
   return latestDate;
 }
 
@@ -506,37 +519,67 @@ function renderRankList(wardsLatest){
     </div>`).join('');
 }
 
-function renderTrend(allRows){
-  const weekMap = new Map();
-  allRows.forEach(r => {
-    const key = r.year + '-' + String(r.week).padStart(3,'0');
-    if(!weekMap.has(key)) weekMap.set(key, { date: r.date_range || r.Date, total: 0, seenWards: new Set() });
-    const entry = weekMap.get(key);
-    if(!entry.seenWards.has(r.ward)){ entry.seenWards.add(r.ward); entry.total += num(r.Total_patient); }
+function weekKey(dateStr){
+  const d = new Date(dateStr);
+  const start = new Date(d.getFullYear(), 0, 1);
+  const days = Math.floor((d - start) / 86400000);
+  const wk = Math.ceil((days + start.getDay() + 1) / 7);
+  return d.getFullYear() + '-W' + String(wk).padStart(2,'0');
+}
+function monthKey(dateStr){ const d = new Date(dateStr); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+function yearKey(dateStr){ return String(new Date(dateStr).getFullYear()); }
+
+function aggregateSeries(series, granularity){
+  if(granularity === 'daily') return series.slice(-120).map(d => ({ label: d.date.slice(5), patients: d.patients, deaths: d.deaths }));
+  const keyFn = granularity === 'weekly' ? weekKey : granularity === 'monthly' ? monthKey : yearKey;
+  const map = new Map();
+  series.forEach(d => {
+    const k = keyFn(d.date);
+    if(!map.has(k)) map.set(k, { patients: 0, deaths: 0 });
+    const e = map.get(k);
+    e.patients += d.patients; e.deaths += d.deaths;
   });
-  const points = Array.from(weekMap.entries()).map(([key, v]) => ({ key, date: v.date, total: v.total }))
-    .sort((a,b) => a.key.localeCompare(b.key, undefined, {numeric:true}));
+  return Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([k,v]) => ({ label: k, ...v }));
+}
+
+function renderTrendChart(){
   const container = document.getElementById('trendChart');
+  const points = aggregateSeries(dghsDailySeries, currentGranularity);
   if(!points.length){ container.innerHTML = '<div class="state-msg">No trend data.</div>'; return; }
-  const W = 1000, H = 260, padL = 40, padR = 20, padT = 20, padB = 30;
-  const maxVal = Math.max(...points.map(p=>p.total), 1);
+  const W = 1000, H = 260, padL = 44, padR = 20, padT = 20, padB = 32;
+  const maxVal = Math.max(...points.map(p => p[currentMetric]), 1);
   const stepX = (W - padL - padR) / Math.max(points.length - 1, 1);
   const scaleY = v => H - padB - (v / maxVal) * (H - padT - padB);
   let path = '', area = '';
   points.forEach((p, i) => {
-    const x = padL + i * stepX, y = scaleY(p.total);
+    const x = padL + i * stepX, y = scaleY(p[currentMetric]);
     path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
     area += (i === 0 ? 'M' + x.toFixed(1) + ',' + (H-padB) + ' L' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
   });
   area += `L${(padL+(points.length-1)*stepX).toFixed(1)},${H-padB} Z`;
   let gridlines = '';
   for(let g=0; g<=4; g++){ const y = padT + g*(H-padT-padB)/4; gridlines += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#D7DED8" stroke-width="1"/>`; }
-  const labelEvery = Math.max(Math.floor(points.length / 8), 1);
+  const labelEvery = Math.max(Math.floor(points.length / 9), 1);
   let xLabels = '';
-  points.forEach((p,i) => { if(i % labelEvery === 0 || i === points.length-1){ const x = padL + i * stepX; xLabels += `<text x="${x.toFixed(1)}" y="${H-8}" font-size="9" fill="#5B6E68" font-family="JetBrains Mono, monospace" text-anchor="middle">${(p.date||'').slice(0,10)}</text>`; } });
-  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">${gridlines}<path d="${area}" fill="#0E7C7420" stroke="none"/><path d="${path}" fill="none" stroke="#0E7C74" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${xLabels}</svg>`;
-  document.getElementById('trendRange').innerText = (points[0].date||'').slice(0,10) + ' → ' + (points[points.length-1].date||'').slice(0,10);
+  points.forEach((p,i) => { if(i % labelEvery === 0 || i === points.length-1){ const x = padL + i * stepX; xLabels += `<text x="${x.toFixed(1)}" y="${H-10}" font-size="9" fill="#5B6E68" font-family="JetBrains Mono, monospace" text-anchor="middle">${p.label}</text>`; } });
+  const color = currentMetric === 'deaths' ? '#C13E36' : '#0E7C74';
+  const fill = currentMetric === 'deaths' ? '#C13E3620' : '#0E7C7420';
+  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">${gridlines}<path d="${area}" fill="${fill}" stroke="none"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${xLabels}</svg>`;
+  document.getElementById('trendRange').innerText = points[0].label + ' → ' + points[points.length-1].label;
 }
+
+document.querySelectorAll('#granToggle button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#granToggle button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  currentGranularity = b.dataset.g;
+  renderTrendChart();
+}));
+document.querySelectorAll('#metricToggle button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#metricToggle button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  currentMetric = b.dataset.m;
+  renderTrendChart();
+}));
 
 /* ---------------- LOAD DGHS DAILY SHEET ---------------- */
 async function loadDghs(){
@@ -560,8 +603,14 @@ async function loadDghs(){
   const byDate = new Map();
   rows.forEach(r => { byDate.set(r.date, { patients: (byDate.get(r.date)?.patients||0) + r.patients, deaths: (byDate.get(r.date)?.deaths||0) + r.deaths }); });
   const dailySeries = Array.from(byDate.entries()).map(([date, v]) => ({ date, ...v })).sort((a,b)=>a.date.localeCompare(b.date));
+  dghsDailySeries = dailySeries;
+  renderTrendChart();
+
   const lastDay = dailySeries[dailySeries.length - 1];
   const lastDate = new Date(lastDay.date);
+  const currentYear = lastDate.getFullYear();
+  document.getElementById('asofLine').innerHTML =
+    `<span data-bn>সর্বশেষ হালনাগাদ (${currentYear}):</span><span data-en>Last updated (${currentYear}):</span> ${lastDay.date}`;
 
   function sumBetween(startDate, endDate){
     return dailySeries.filter(d => d.date >= startDate && d.date <= endDate)
@@ -617,7 +666,7 @@ async function loadDghs(){
           <div class="stat-delta ${mom>0?'up':mom<0?'down':''}">${fmtPct(mom)} <span data-bn>আগের মাস থেকে</span><span data-en>vs prior month</span></div>
         </div>
         <div class="stat-cell">
-          <div class="stat-label"><span data-bn>গত ১ জানুয়ারি থেকে অদ্যাবধি</span><span data-en>Since Jan 1 (YTD)</span></div>
+          <div class="stat-label"><span data-bn>১ জানুয়ারি ${currentYear} থেকে অদ্যাবধি</span><span data-en>Since Jan 1, ${currentYear} (YTD)</span></div>
           <div class="stat-value">${ytd[kind].toLocaleString()}</div>
         </div>
         <div class="stat-cell">
