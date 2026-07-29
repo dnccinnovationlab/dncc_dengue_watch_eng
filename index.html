@@ -315,10 +315,10 @@ function getRanges(gran, last){
   }
   const curStart = new Date(Date.UTC(Y,0,1));
   const prevStart = new Date(Date.UTC(Y-1,0,1));
-  const prevEnd = new Date(Date.UTC(Y-1,11,31));
+  const prevEnd = new Date(Date.UTC(Y-1,M,D));
   return {
     cur:[iso(curStart), iso(last)], prev:[iso(prevStart), iso(prevEnd)], yago:null,
-    curLabel:{bn:`এই বছরে (${Y})`, en:`This year (${Y})`}, prevLabel:{bn:'আগের পূর্ণ বছরের তুলনায়', en:'vs prior full year'}, yagoLabel:null
+    curLabel:{bn:`এই বছরে (${Y}, YTD)`, en:`This year (${Y}, YTD)`}, prevLabel:{bn:'আগের বছরের একই সময়ের তুলনায়', en:'vs same YTD period last year'}, yagoLabel:null
   };
 }
 
@@ -418,7 +418,7 @@ function renderTrendChart(){
         </g>
         <rect id="chartOverlay" x="${padL}" y="${padT}" width="${Math.max(W-padL-padR,1)}" height="${Math.max(H-padT-padB,1)}" fill="transparent" style="cursor:crosshair;"/>
       </svg>
-      <div id="chartTooltip" style="position:absolute;display:none;pointer-events:none;background:var(--ink);color:#fff;font-family:var(--font-mono);font-size:11.5px;padding:6px 10px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-120%);z-index:5;"></div>
+      <div id="chartTooltip" style="position:absolute;display:none;pointer-events:none;background:var(--ink);color:#fff;font-family:var(--font-body);font-size:13.5px;line-height:1.5;padding:8px 12px;border-radius:10px;white-space:nowrap;transform:translate(-50%,-125%);z-index:5;box-shadow:0 6px 18px rgba(18,42,44,.35);font-variant-numeric:tabular-nums;"></div>
     </div>`;
 
   const svgEl = document.getElementById('trendSvg');
@@ -447,7 +447,7 @@ function renderTrendChart(){
     tooltip.style.display = '';
     const curLang = document.body.getAttribute('data-lang');
     const mLabel = curLang === 'en' ? metricLabelEn : metricLabelBn;
-    tooltip.innerHTML = `<strong>${p.label}</strong><br>${mLabel}: ${p[currentMetric].toLocaleString()}`;
+    tooltip.innerHTML = `<div style="font-family:var(--font-mono);font-size:10.5px;color:#9FC9C4;letter-spacing:.03em;margin-bottom:3px;">${p.label} · ${mLabel}</div><div style="font-family:var(--font-display);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;">${p[currentMetric].toLocaleString()}</div>`;
     const wrapperRect = wrapperEl.getBoundingClientRect();
     tooltip.style.left = (rect.left - wrapperRect.left + px / scaleFactor) + 'px';
     tooltip.style.top = (rect.top - wrapperRect.top + py / scaleFactor) + 'px';
