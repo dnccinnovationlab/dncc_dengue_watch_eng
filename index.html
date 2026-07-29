@@ -218,22 +218,23 @@ function findColExact(headers, name){
 function fmtPct(v){ if(v===null||!isFinite(v)) return '—'; const s = v>=0?'▲':'▼'; return s+' '+Math.abs(v).toFixed(0)+'%'; }
 function fmtRate(v){ return (v===null||!isFinite(v)) ? '—' : v.toFixed(1)+'%'; }
 function iso(d){ return d.toISOString().slice(0,10); }
+function ymd(y, m, d){ return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
 
 let dghsDailySeries = [];
 let lastDate = null;
 let currentGranularity = 'daily';
 let currentMetric = 'patients';
 
-/* ---------------- EPI WEEK (Monday-start, ISO 8601) ---------------- */
+/* ---------------- EPI WEEK (Monday-start, ISO 8601) — all arithmetic in UTC to avoid
+   local-timezone date-boundary shifts (date-only CSV values are parsed as UTC midnight) ---------------- */
 function mondayOf(date){
-  const d = new Date(date);
-  d.setHours(0,0,0,0);
-  const day = (d.getDay() + 6) % 7; // Monday=0 ... Sunday=6
-  d.setDate(d.getDate() - day);
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = (d.getUTCDay() + 6) % 7; // Monday=0 ... Sunday=6
+  d.setUTCDate(d.getUTCDate() - day);
   return d;
 }
 function isoWeekOf(date){
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7; // Sunday=0 -> 7
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -251,8 +252,8 @@ function weekKey(dateStr){
   const { year, week } = isoWeekOf(new Date(dateStr));
   return year + '-W' + String(week).padStart(2,'0');
 }
-function monthKey(dateStr){ const d = new Date(dateStr); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
-function yearKey(dateStr){ return String(new Date(dateStr).getFullYear()); }
+function monthKey(dateStr){ const d = new Date(dateStr); return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0'); }
+function yearKey(dateStr){ return String(new Date(dateStr).getUTCFullYear()); }
 
 const ZERO = { patients:0, deaths:0, affected:0, dhakaCase:0, bdDeath:0, dhakaDeath:0 };
 function addRec(a,b){
@@ -279,10 +280,10 @@ function pct(curr, base){ return base > 0 ? ((curr-base)/base*100) : (curr>0 ? n
 
 /* ---------------- RANGE DEFINITIONS PER GRANULARITY ---------------- */
 function getRanges(gran, last){
-  const Y = last.getFullYear(), M = last.getMonth(), D = last.getDate();
+  const Y = last.getUTCFullYear(), M = last.getUTCMonth(), D = last.getUTCDate();
   if(gran === 'daily'){
-    const prevD = new Date(last); prevD.setDate(prevD.getDate()-1);
-    const yagoD = new Date(Y-1, M, D);
+    const prevD = new Date(last); prevD.setUTCDate(prevD.getUTCDate()-1);
+    const yagoD = new Date(Date.UTC(Y-1, M, D));
     return {
       cur:[iso(last), iso(last)], prev:[iso(prevD), iso(prevD)], yago:[iso(yagoD), iso(yagoD)],
       curLabel:{bn:'আজ', en:'Today'}, prevLabel:{bn:'গতকালের তুলনায়', en:'vs yesterday'}, yagoLabel:{bn:'গত বছরের একই দিনের তুলনায়', en:'vs same day last year'}
@@ -290,31 +291,31 @@ function getRanges(gran, last){
   }
   if(gran === 'weekly'){
     const curStart = mondayOf(last);
-    const prevEnd = new Date(curStart); prevEnd.setDate(prevEnd.getDate()-1);
+    const prevEnd = new Date(curStart); prevEnd.setUTCDate(prevEnd.getUTCDate()-1);
     const prevStart = mondayOf(prevEnd);
     const { year: wYear, week: wNum } = isoWeekOf(last);
     const yagoStart = mondayOfISOWeek(wNum, wYear-1);
     const elapsedDays = Math.round((last - curStart) / 86400000);
-    const yagoEnd = new Date(yagoStart); yagoEnd.setDate(yagoEnd.getDate() + elapsedDays);
+    const yagoEnd = new Date(yagoStart); yagoEnd.setUTCDate(yagoEnd.getUTCDate() + elapsedDays);
     return {
       cur:[iso(curStart), iso(last)], prev:[iso(prevStart), iso(prevEnd)], yago:[iso(yagoStart), iso(yagoEnd)],
       curLabel:{bn:'এই সপ্তাহে (সোমবার শুরু)', en:'This week (Mon–Sun)'}, prevLabel:{bn:'আগের সপ্তাহের তুলনায়', en:'vs prior week'}, yagoLabel:{bn:'গত বছরের একই সপ্তাহের তুলনায়', en:'vs same epi week last year'}
     };
   }
   if(gran === 'monthly'){
-    const curStart = new Date(Y, M, 1);
-    const prevMonthEnd = new Date(Y, M, 0);
-    const prevMonthStart = new Date(Y, M-1, 1);
-    const yagoStart = new Date(Y-1, M, 1);
-    const yagoEnd = new Date(Y-1, M, D);
+    const curStart = new Date(Date.UTC(Y, M, 1));
+    const prevMonthEnd = new Date(Date.UTC(Y, M, 0));
+    const prevMonthStart = new Date(Date.UTC(Y, M-1, 1));
+    const yagoStart = new Date(Date.UTC(Y-1, M, 1));
+    const yagoEnd = new Date(Date.UTC(Y-1, M, D));
     return {
       cur:[iso(curStart), iso(last)], prev:[iso(prevMonthStart), iso(prevMonthEnd)], yago:[iso(yagoStart), iso(yagoEnd)],
       curLabel:{bn:'এই মাসে', en:'This month'}, prevLabel:{bn:'আগের মাসের তুলনায়', en:'vs prior month'}, yagoLabel:{bn:'গত বছরের একই মাসের তুলনায়', en:'vs same month last year'}
     };
   }
-  const curStart = new Date(Y,0,1);
-  const prevStart = new Date(Y-1,0,1);
-  const prevEnd = new Date(Y-1,11,31);
+  const curStart = new Date(Date.UTC(Y,0,1));
+  const prevStart = new Date(Date.UTC(Y-1,0,1));
+  const prevEnd = new Date(Date.UTC(Y-1,11,31));
   return {
     cur:[iso(curStart), iso(last)], prev:[iso(prevStart), iso(prevEnd)], yago:null,
     curLabel:{bn:`এই বছরে (${Y})`, en:`This year (${Y})`}, prevLabel:{bn:'আগের পূর্ণ বছরের তুলনায়', en:'vs prior full year'}, yagoLabel:null
@@ -330,7 +331,7 @@ function renderCards(){
   const curAgg = sumBetween(dghsDailySeries, r.cur[0], r.cur[1]);
   const prevAgg = sumBetween(dghsDailySeries, r.prev[0], r.prev[1]);
   const yagoAgg = r.yago ? sumBetween(dghsDailySeries, r.yago[0], r.yago[1]) : null;
-  const ytdAgg = sumBetween(dghsDailySeries, iso(new Date(Y,0,1)), iso(lastDate));
+  const ytdAgg = sumBetween(dghsDailySeries, iso(new Date(Date.UTC(Y,0,1))), iso(lastDate));
 
   const curV = curAgg[currentMetric], prevV = prevAgg[currentMetric], yagoV = yagoAgg ? yagoAgg[currentMetric] : null, ytdV = ytdAgg[currentMetric];
   const pctPrev = pct(curV, prevV);
@@ -369,12 +370,10 @@ function renderCards(){
   cards.push(`<div class="card">
     <div class="card-label"><span data-bn>বাংলাদেশের মধ্যে হার</span><span data-en>Share of Bangladesh total</span></div>
     <div class="card-value" style="font-size:26px;">${fmtRate(rateBD)}</div>
-    <div class="card-sub">${currentMetric==='patients'?'dncc_case / affected':'dncc_death / death'} × 100</div>
   </div>`);
   cards.push(`<div class="card">
     <div class="card-label"><span data-bn>ঢাকা সিটির মধ্যে হার</span><span data-en>Share of Dhaka city total</span></div>
     <div class="card-value" style="font-size:26px;">${fmtRate(rateDhaka)}</div>
-    <div class="card-sub">${currentMetric==='patients'?'dncc_case / dhaka_case':'dncc_death / dhaka_death'} × 100</div>
   </div>`);
 
   grid.innerHTML = cards.join('');
@@ -403,7 +402,62 @@ function renderTrendChart(){
   points.forEach((p,i) => { if(i % labelEvery === 0 || i === points.length-1){ const x = padL + i * stepX; xLabels += `<text x="${x.toFixed(1)}" y="${H-10}" font-size="9" fill="#5B6E68" font-family="JetBrains Mono, monospace" text-anchor="middle">${p.label}</text>`; } });
   const color = currentMetric === 'deaths' ? '#C13E36' : '#0E7C74';
   const fill = currentMetric === 'deaths' ? '#C13E3620' : '#0E7C7420';
-  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">${gridlines}<path d="${area}" fill="${fill}" stroke="none"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${xLabels}</svg>`;
+  const metricLabelBn = currentMetric === 'deaths' ? 'মৃত্যু' : 'রোগী';
+  const metricLabelEn = currentMetric === 'deaths' ? 'Deaths' : 'Patients';
+
+  container.innerHTML = `
+    <div style="position:relative;">
+      <svg id="trendSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;display:block;">
+        ${gridlines}
+        <path d="${area}" fill="${fill}" stroke="none"/>
+        <path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        ${xLabels}
+        <g id="hoverLayer" style="display:none;">
+          <line id="hoverLine" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="${color}" stroke-width="1" stroke-dasharray="3,3"/>
+          <circle id="hoverDot" r="4" fill="${color}" stroke="#fff" stroke-width="1.5"/>
+        </g>
+        <rect id="chartOverlay" x="${padL}" y="${padT}" width="${Math.max(W-padL-padR,1)}" height="${Math.max(H-padT-padB,1)}" fill="transparent" style="cursor:crosshair;"/>
+      </svg>
+      <div id="chartTooltip" style="position:absolute;display:none;pointer-events:none;background:var(--ink);color:#fff;font-family:var(--font-mono);font-size:11.5px;padding:6px 10px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-120%);z-index:5;"></div>
+    </div>`;
+
+  const svgEl = document.getElementById('trendSvg');
+  const overlay = document.getElementById('chartOverlay');
+  const hoverLayer = document.getElementById('hoverLayer');
+  const hoverLine = document.getElementById('hoverLine');
+  const hoverDot = document.getElementById('hoverDot');
+  const tooltip = document.getElementById('chartTooltip');
+  const wrapperEl = svgEl.parentElement;
+  const lang = document.body.getAttribute('data-lang');
+
+  function handleMove(evt){
+    const rect = svgEl.getBoundingClientRect();
+    if(rect.width === 0) return;
+    const scaleFactor = W / rect.width;
+    const clientX = (evt.touches ? evt.touches[0].clientX : evt.clientX);
+    const xInSvg = (clientX - rect.left) * scaleFactor;
+    let idx = Math.round((xInSvg - padL) / stepX);
+    idx = Math.max(0, Math.min(points.length - 1, idx));
+    const p = points[idx];
+    const px = padL + idx * stepX;
+    const py = scaleY(p[currentMetric]);
+    hoverLine.setAttribute('x1', px); hoverLine.setAttribute('x2', px);
+    hoverDot.setAttribute('cx', px); hoverDot.setAttribute('cy', py);
+    hoverLayer.style.display = '';
+    tooltip.style.display = '';
+    const curLang = document.body.getAttribute('data-lang');
+    const mLabel = curLang === 'en' ? metricLabelEn : metricLabelBn;
+    tooltip.innerHTML = `<strong>${p.label}</strong><br>${mLabel}: ${p[currentMetric].toLocaleString()}`;
+    const wrapperRect = wrapperEl.getBoundingClientRect();
+    tooltip.style.left = (rect.left - wrapperRect.left + px / scaleFactor) + 'px';
+    tooltip.style.top = (rect.top - wrapperRect.top + py / scaleFactor) + 'px';
+  }
+  function handleLeave(){ hoverLayer.style.display = 'none'; tooltip.style.display = 'none'; }
+  overlay.addEventListener('mousemove', handleMove);
+  overlay.addEventListener('mouseleave', handleLeave);
+  overlay.addEventListener('touchmove', handleMove, {passive:true});
+  overlay.addEventListener('touchend', handleLeave);
+
   document.getElementById('trendRange').innerText = points[0].label + ' → ' + points[points.length-1].label;
 }
 
