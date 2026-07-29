@@ -99,7 +99,7 @@
       </div>
     </div>
     <div class="nav-right">
-      <div class="pulse-badge"><span class="pulse-dot" id="pulseDot"></span><span data-bn>লাইভ শীট থেকে</span><span data-en>live from sheet</span></div>
+      <div class="pulse-badge"><span class="pulse-dot" id="pulseDot"></span></div>
       <button class="refresh-btn" id="refreshBtn">↻ <span data-bn>রিফ্রেশ</span><span data-en>refresh</span></button>
       <div class="lang-toggle"><button id="btnBn" class="active">বাংলা</button><button id="btnEn">EN</button></div>
     </div>
@@ -109,7 +109,6 @@
 <main class="wrap">
 
   <section class="hero">
-    <div class="eyebrow"><span data-bn>DGHS দৈনিক প্রতিবেদন</span><span data-en>DGHS daily report</span></div>
     <h1 class="headline">
       <span data-bn>ঢাকা উত্তরের ডেঙ্গু পরিস্থিতি</span>
       <span data-en>Dhaka North dengue situation</span>
@@ -157,15 +156,6 @@
   </section>
 
 </main>
-
-<footer>
-  <div class="wrap foot-grid">
-    <div>
-      <div data-bn>উপাত্ত সূত্র: স্বাস্থ্য অধিদপ্তর (DGHS) — লাইভ গুগল শীট সংযোগ। ২০ মিনিট পর্যন্ত বিলম্বিত হতে পারে।</div>
-      <div data-en>Data source: Directorate General of Health Services (DGHS) — live Google Sheets connection. May lag up to 20 minutes.</div>
-    </div>
-  </div>
-</footer>
 
 <script>
 /* ---------------- CONFIG ---------------- */
@@ -219,7 +209,14 @@ function findCol(headers, patterns){
   }
   return null;
 }
+function findColExact(headers, name){
+  const idx = headers.findIndex(h => h.trim().toLowerCase() === name.toLowerCase());
+  if(idx !== -1) return headers[idx];
+  const idx2 = headers.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+  return idx2 !== -1 ? headers[idx2] : null;
+}
 function fmtPct(v){ if(v===null||!isFinite(v)) return '—'; const s = v>=0?'▲':'▼'; return s+' '+Math.abs(v).toFixed(0)+'%'; }
+function fmtRate(v){ return (v===null||!isFinite(v)) ? '—' : v.toFixed(1)+'%'; }
 function iso(d){ return d.toISOString().slice(0,10); }
 
 let dghsDailySeries = [];
@@ -227,33 +224,56 @@ let lastDate = null;
 let currentGranularity = 'daily';
 let currentMetric = 'patients';
 
-/* ---------------- WEEK/MONTH/YEAR AGGREGATION KEYS ---------------- */
+/* ---------------- EPI WEEK (Monday-start, ISO 8601) ---------------- */
+function mondayOf(date){
+  const d = new Date(date);
+  d.setHours(0,0,0,0);
+  const day = (d.getDay() + 6) % 7; // Monday=0 ... Sunday=6
+  d.setDate(d.getDate() - day);
+  return d;
+}
+function isoWeekOf(date){
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7; // Sunday=0 -> 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { year: d.getUTCFullYear(), week: weekNo };
+}
+function mondayOfISOWeek(week, year){
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = (jan4.getUTCDay() + 6) % 7;
+  const week1Monday = new Date(jan4); week1Monday.setUTCDate(jan4.getUTCDate() - jan4Day);
+  const monday = new Date(week1Monday); monday.setUTCDate(week1Monday.getUTCDate() + (week-1)*7);
+  return monday;
+}
 function weekKey(dateStr){
-  const d = new Date(dateStr);
-  const start = new Date(d.getFullYear(), 0, 1);
-  const days = Math.floor((d - start) / 86400000);
-  const wk = Math.ceil((days + start.getDay() + 1) / 7);
-  return d.getFullYear() + '-W' + String(wk).padStart(2,'0');
+  const { year, week } = isoWeekOf(new Date(dateStr));
+  return year + '-W' + String(week).padStart(2,'0');
 }
 function monthKey(dateStr){ const d = new Date(dateStr); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function yearKey(dateStr){ return String(new Date(dateStr).getFullYear()); }
 
+const ZERO = { patients:0, deaths:0, affected:0, dhakaCase:0, bdDeath:0, dhakaDeath:0 };
+function addRec(a,b){
+  return { patients:a.patients+b.patients, deaths:a.deaths+b.deaths, affected:a.affected+b.affected,
+    dhakaCase:a.dhakaCase+b.dhakaCase, bdDeath:a.bdDeath+b.bdDeath, dhakaDeath:a.dhakaDeath+b.dhakaDeath };
+}
+
 function aggregateSeries(series, granularity){
-  if(granularity === 'daily') return series.slice(-120).map(d => ({ label: d.date.slice(5), patients: d.patients, deaths: d.deaths }));
+  if(granularity === 'daily') return series.slice(-120).map(d => ({ label: d.date.slice(5), ...d }));
   const keyFn = granularity === 'weekly' ? weekKey : granularity === 'monthly' ? monthKey : yearKey;
   const map = new Map();
   series.forEach(d => {
     const k = keyFn(d.date);
-    if(!map.has(k)) map.set(k, { patients: 0, deaths: 0 });
-    const e = map.get(k);
-    e.patients += d.patients; e.deaths += d.deaths;
+    if(!map.has(k)) map.set(k, { ...ZERO });
+    map.set(k, addRec(map.get(k), d));
   });
   return Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([k,v]) => ({ label: k, ...v }));
 }
 
 function sumBetween(series, startDate, endDate){
-  return series.filter(d => d.date >= startDate && d.date <= endDate)
-    .reduce((acc,d)=>({patients: acc.patients+d.patients, deaths: acc.deaths+d.deaths}), {patients:0, deaths:0});
+  return series.filter(d => d.date >= startDate && d.date <= endDate).reduce((acc,d)=>addRec(acc,d), { ...ZERO });
 }
 function pct(curr, base){ return base > 0 ? ((curr-base)/base*100) : (curr>0 ? null : 0); }
 
@@ -269,14 +289,16 @@ function getRanges(gran, last){
     };
   }
   if(gran === 'weekly'){
-    const curStart = new Date(last); curStart.setDate(curStart.getDate()-6);
+    const curStart = mondayOf(last);
     const prevEnd = new Date(curStart); prevEnd.setDate(prevEnd.getDate()-1);
-    const prevStart = new Date(prevEnd); prevStart.setDate(prevStart.getDate()-6);
-    const yagoEnd = new Date(Y-1, M, D);
-    const yagoStart = new Date(yagoEnd); yagoStart.setDate(yagoStart.getDate()-6);
+    const prevStart = mondayOf(prevEnd);
+    const { year: wYear, week: wNum } = isoWeekOf(last);
+    const yagoStart = mondayOfISOWeek(wNum, wYear-1);
+    const elapsedDays = Math.round((last - curStart) / 86400000);
+    const yagoEnd = new Date(yagoStart); yagoEnd.setDate(yagoEnd.getDate() + elapsedDays);
     return {
       cur:[iso(curStart), iso(last)], prev:[iso(prevStart), iso(prevEnd)], yago:[iso(yagoStart), iso(yagoEnd)],
-      curLabel:{bn:'এই সপ্তাহে', en:'This week'}, prevLabel:{bn:'আগের সপ্তাহের তুলনায়', en:'vs prior week'}, yagoLabel:{bn:'গত বছরের একই সপ্তাহের তুলনায়', en:'vs same week last year'}
+      curLabel:{bn:'এই সপ্তাহে (সোমবার শুরু)', en:'This week (Mon–Sun)'}, prevLabel:{bn:'আগের সপ্তাহের তুলনায়', en:'vs prior week'}, yagoLabel:{bn:'গত বছরের একই সপ্তাহের তুলনায়', en:'vs same epi week last year'}
     };
   }
   if(gran === 'monthly'){
@@ -305,19 +327,26 @@ function renderCards(){
   if(!dghsDailySeries.length || !lastDate) return;
   const r = getRanges(currentGranularity, lastDate);
   const Y = lastDate.getFullYear();
-  const curV = sumBetween(dghsDailySeries, r.cur[0], r.cur[1])[currentMetric];
-  const prevV = sumBetween(dghsDailySeries, r.prev[0], r.prev[1])[currentMetric];
-  const yagoV = r.yago ? sumBetween(dghsDailySeries, r.yago[0], r.yago[1])[currentMetric] : null;
-  const ytdV = sumBetween(dghsDailySeries, iso(new Date(Y,0,1)), iso(lastDate))[currentMetric];
+  const curAgg = sumBetween(dghsDailySeries, r.cur[0], r.cur[1]);
+  const prevAgg = sumBetween(dghsDailySeries, r.prev[0], r.prev[1]);
+  const yagoAgg = r.yago ? sumBetween(dghsDailySeries, r.yago[0], r.yago[1]) : null;
+  const ytdAgg = sumBetween(dghsDailySeries, iso(new Date(Y,0,1)), iso(lastDate));
+
+  const curV = curAgg[currentMetric], prevV = prevAgg[currentMetric], yagoV = yagoAgg ? yagoAgg[currentMetric] : null, ytdV = ytdAgg[currentMetric];
   const pctPrev = pct(curV, prevV);
   const pctYago = yagoV !== null ? pct(curV, yagoV) : null;
   const upDown = v => v>0 ? 'up' : v<0 ? 'down' : '';
+
+  const bdTotalKey = currentMetric === 'patients' ? 'affected' : 'bdDeath';
+  const dhakaTotalKey = currentMetric === 'patients' ? 'dhakaCase' : 'dhakaDeath';
+  const rateBD = curAgg[bdTotalKey] > 0 ? (curV / curAgg[bdTotalKey]) * 100 : null;
+  const rateDhaka = curAgg[dhakaTotalKey] > 0 ? (curV / curAgg[dhakaTotalKey]) * 100 : null;
 
   let cards = [
     `<div class="card big">
       <div class="card-label">${r.curLabel.bn ? `<span data-bn>${r.curLabel.bn}</span><span data-en>${r.curLabel.en}</span>` : ''}</div>
       <div class="card-value">${curV.toLocaleString()}</div>
-      <div class="card-sub"><span data-bn>${currentMetric==='patients'?'হাসপাতালে ভর্তিকৃত রোগী':'ডেঙ্গুর কারণে মৃত্যু'}</span><span data-en>${currentMetric==='patients'?'hospital-admitted patients':'dengue deaths'}</span></div>
+      <div class="card-sub"><span data-bn>${currentMetric==='patients'?'ডিএনসিসিতে হাসপাতালে ভর্তিকৃত রোগী':'ডিএনসিসিতে ডেঙ্গুর কারণে মৃত্যু'}</span><span data-en>${currentMetric==='patients'?'DNCC hospital-admitted patients':'DNCC dengue deaths'}</span></div>
     </div>`,
     `<div class="card">
       <div class="card-label"><span data-bn>${r.prevLabel.bn}</span><span data-en>${r.prevLabel.en}</span></div>
@@ -336,6 +365,16 @@ function renderCards(){
     <div class="card-label"><span data-bn>১ জানুয়ারি ${Y} থেকে অদ্যাবধি</span><span data-en>Since Jan 1, ${Y} (YTD)</span></div>
     <div class="card-value">${ytdV.toLocaleString()}</div>
     <div class="card-sub"><span data-bn>চলতি বছরের সঞ্চিত সংখ্যা</span><span data-en>cumulative this year</span></div>
+  </div>`);
+  cards.push(`<div class="card">
+    <div class="card-label"><span data-bn>বাংলাদেশের মধ্যে হার</span><span data-en>Share of Bangladesh total</span></div>
+    <div class="card-value" style="font-size:26px;">${fmtRate(rateBD)}</div>
+    <div class="card-sub">${currentMetric==='patients'?'dncc_case / affected':'dncc_death / death'} × 100</div>
+  </div>`);
+  cards.push(`<div class="card">
+    <div class="card-label"><span data-bn>ঢাকা সিটির মধ্যে হার</span><span data-en>Share of Dhaka city total</span></div>
+    <div class="card-value" style="font-size:26px;">${fmtRate(rateDhaka)}</div>
+    <div class="card-sub">${currentMetric==='patients'?'dncc_case / dhaka_case':'dncc_death / dhaka_death'} × 100</div>
   </div>`);
 
   grid.innerHTML = cards.join('');
@@ -392,19 +431,33 @@ async function loadDashboard(){
     const { headers, records } = parseCSV(await res.text());
     if(!records.length) throw new Error('empty dghs sheet');
 
-    const dateCol = findCol(headers, ['date']);
-    const patientCol = findCol(headers, ['patient', 'case', 'admit']);
-    const deathCol = findCol(headers, ['death']);
-    if(!dateCol || !patientCol){
-      document.getElementById('cardsGrid').innerHTML = '<div class="state-msg">Could not find date/patient columns in daily_dengue_dghs — check that sheet\u2019s header names.</div>';
+    const dateCol = findColExact(headers, 'date');
+    const caseCol = findColExact(headers, 'dncc_case');
+    const dncDeathCol = findColExact(headers, 'dncc_death');
+    const affectedCol = findColExact(headers, 'affected');
+    const dhakaCaseCol = findColExact(headers, 'dhaka_case');
+    const dhakaDeathCol = findColExact(headers, 'dhaka_death');
+    const bdDeathCol = headers.find(h => h.trim().toLowerCase() === 'death') || null;
+    if(!dateCol || !caseCol){
+      document.getElementById('cardsGrid').innerHTML = '<div class="state-msg">Could not find date/dncc_case columns in daily_dengue_dghs — check that sheet\u2019s header names.</div>';
       return;
     }
 
-    const rows = records.map(r => ({ date: r[dateCol], patients: num(r[patientCol]), deaths: deathCol ? num(r[deathCol]) : 0 }))
-      .filter(r => r.date).sort((a,b) => a.date.localeCompare(b.date));
+    const rows = records.map(r => ({
+      date: r[dateCol],
+      patients: num(r[caseCol]),
+      deaths: dncDeathCol ? num(r[dncDeathCol]) : 0,
+      affected: affectedCol ? num(r[affectedCol]) : 0,
+      dhakaCase: dhakaCaseCol ? num(r[dhakaCaseCol]) : 0,
+      bdDeath: bdDeathCol ? num(r[bdDeathCol]) : 0,
+      dhakaDeath: dhakaDeathCol ? num(r[dhakaDeathCol]) : 0
+    })).filter(r => r.date).sort((a,b) => a.date.localeCompare(b.date));
 
     const byDate = new Map();
-    rows.forEach(r => { byDate.set(r.date, { patients: (byDate.get(r.date)?.patients||0) + r.patients, deaths: (byDate.get(r.date)?.deaths||0) + r.deaths }); });
+    rows.forEach(r => {
+      const prior = byDate.get(r.date) || { ...ZERO };
+      byDate.set(r.date, addRec(prior, r));
+    });
     dghsDailySeries = Array.from(byDate.entries()).map(([date, v]) => ({ date, ...v })).sort((a,b)=>a.date.localeCompare(b.date));
     lastDate = new Date(dghsDailySeries[dghsDailySeries.length - 1].date);
     const currentYear = lastDate.getFullYear();
