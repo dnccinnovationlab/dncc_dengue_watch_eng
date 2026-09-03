@@ -107,6 +107,16 @@
   .ward-popup td{padding:4px 0;border-top:1px solid var(--line);}
   .ward-popup td.k{color:var(--muted);}
   .ward-popup td.v{text-align:right;font-weight:700;font-family:var(--font-mono);}
+  .ward-popup .section-label{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 0 2px;}
+
+  .date-input{font-family:var(--font-mono);font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--panel);color:var(--ink);}
+  .rank-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .rank-table th{text-align:left;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:10px 16px;border-bottom:1px solid var(--line);background:var(--paper);white-space:nowrap;}
+  .rank-table td{padding:10px 16px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .rank-table tr:nth-child(even) td{background:#FAFCFB;}
+  .rank-table td.rank-cell{font-family:var(--font-display);font-weight:700;font-size:15px;}
+  .rank-table td.ward-cell{font-weight:600;white-space:nowrap;}
+  .rank-table td.badge-cell span{display:inline-block;padding:3px 10px;border-radius:999px;color:#fff;font-size:11px;font-weight:600;font-family:var(--font-mono);white-space:nowrap;}
 </style>
 </head>
 <body data-lang="bn">
@@ -162,7 +172,11 @@
           <button data-m="deaths"><span data-bn>✝ মৃত্যু</span><span data-en>✝ Deaths</span></button>
         </div>
       </div>
-      <span class="source-tag">Source: DGHS</span>
+      <div class="toggle-block" id="yearFilterBlock">
+        <span class="toggle-group-label"><span data-bn>বছর (একাধিক নির্বাচন)</span><span data-en>Year (select multiple)</span></span>
+        <div class="lang-toggle" id="yearToggle"></div>
+      </div>
+      <a class="source-tag" href="https://dashboard.dghs.gov.bd/pages/heoc_dengue_v1.php" target="_blank" rel="noopener" style="text-decoration:none;">Source: DGHS</a>
     </div>
 
     <div class="cards-grid" id="cardsGrid">
@@ -181,14 +195,18 @@
 
   <section class="block" id="mapSection">
     <div class="controls-bar">
-      <div class="toggle-block">
-        <span class="toggle-group-label"><span data-bn>নির্দেশক</span><span data-en>Metric</span></span>
-        <div class="lang-toggle" id="mapMetricToggle">
-          <button data-mm="patients" class="active"><span data-bn>🏥 রোগী</span><span data-en>🏥 Patients</span></button>
-          <button data-mm="deaths"><span data-bn>✝ মৃত্যু</span><span data-en>✝ Deaths</span></button>
-        </div>
+      <div>
+        <h2 style="font-family:var(--font-display);font-weight:600;font-size:20px;margin:0 0 4px;color:var(--ink);">
+          <span data-bn>ওয়ার্ডভিত্তিক ডেঙ্গু ঝুঁকি সূচক</span><span data-en>Ward wise Dengue Risk Index</span>
+        </h2>
+        <a href="https://drive.google.com/file/d/1QsvBzixKc2XU9-jsugV6qU7Oo5hrc65u/view?usp=drive_link" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);text-decoration:none;">
+          <span data-bn>পদ্ধতি (মেথডোলজি) →</span><span data-en>Methodology →</span>
+        </a>
       </div>
-      <span class="source-tag"><span data-bn>উৎস: DNCC ওয়ার্ড ঝুঁকি সূচক</span><span data-en>Source: DNCC ward risk index</span></span>
+      <div class="toggle-block">
+        <span class="toggle-group-label"><span data-bn>তারিখ নির্বাচন করুন</span><span data-en>Select date</span></span>
+        <input type="date" id="riskDateFilter" class="date-input">
+      </div>
     </div>
 
     <div class="map-card">
@@ -202,9 +220,14 @@
         <span><i class="legend-dot" style="background:var(--nodata)"></i><span data-bn>তথ্য নেই</span><span data-en>No data</span></span>
       </div>
     </div>
-    <div class="chart-caption">
-      <span data-bn>উৎস: DNCC ওয়ার্ডভিত্তিক ডেঙ্গু ঝুঁকি সূচক (কম্পোজিট রিস্ক ইনডেক্স)</span><span data-en>Source: DNCC ward-level dengue composite risk index</span>
-      <span id="mapWeekRange">—</span>
+
+    <div class="chart-card" style="margin-top:16px;padding:0;overflow:hidden;">
+      <div style="padding:20px 22px 12px;">
+        <div class="card-label"><span data-bn>ওয়ার্ড র‍্যাংকিং (সবচেয়ে ঝুঁকিপূর্ণ ওয়ার্ড উপরে রয়েছে)</span><span data-en>Ward ranking (most at-risk ward on top)</span></div>
+      </div>
+      <div id="rankTableWrap" style="overflow-x:auto;">
+        <table class="rank-table" id="rankTable"></table>
+      </div>
     </div>
   </section>
 
@@ -226,6 +249,7 @@ function setLang(l){
   btnBn.classList.toggle('active', l==='bn');
   btnEn.classList.toggle('active', l==='en');
   if(typeof onLangChangeForMap === 'function') onLangChangeForMap(l);
+  if(dghsDailySeries.length) renderTrendChart();
 }
 
 /* ---------------- CSV PARSER ---------------- */
@@ -278,6 +302,14 @@ let dghsDailySeries = [];
 let lastDate = null;
 let currentGranularity = 'daily';
 let currentMetric = 'patients';
+let selectedYears = new Set();
+const YEAR_COLORS = ['#0E7C74','#C13E36','#8E5BC1','#C1900E','#3E6FC1','#2E8E5B','#C15B9E'];
+const MONTH_LABELS_BN = ['জানু','ফেব্রু','মার্চ','এপ্রি','মে','জুন','জুলা','আগ','সেপ্টে','অক্টো','নভে','ডিসে'];
+const MONTH_LABELS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dayOfYearUTC(d){
+  const start = Date.UTC(d.getUTCFullYear(),0,1);
+  return Math.floor((Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()) - start)/86400000) + 1;
+}
 
 /* ---------------- EPI WEEK (Monday-start, ISO 8601) — all arithmetic in UTC to avoid
    local-timezone date-boundary shifts (date-only CSV values are parsed as UTC midnight) ---------------- */
@@ -325,6 +357,44 @@ function aggregateSeries(series, granularity){
     map.set(k, addRec(map.get(k), d));
   });
   return Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([k,v]) => ({ label: k, ...v }));
+}
+
+/* ---- per-year, period-of-year series (for multi-year overlay comparison) ---- */
+function buildYearSeries(year, granularity, lang){
+  const yearRows = dghsDailySeries.filter(d => d.date.slice(0,4) === String(year));
+  if(granularity === 'daily'){
+    return yearRows.map(d => ({ period: dayOfYearUTC(new Date(d.date)), label: d.date.slice(5), ...d }));
+  }
+  if(granularity === 'weekly'){
+    const map = new Map();
+    yearRows.forEach(d => {
+      const { week } = isoWeekOf(new Date(d.date));
+      if(!map.has(week)) map.set(week, { ...ZERO });
+      map.set(week, addRec(map.get(week), d));
+    });
+    return Array.from(map.entries()).sort((a,b)=>a[0]-b[0]).map(([week,v]) => ({ period: week, label: 'W'+String(week).padStart(2,'0'), ...v }));
+  }
+  const map = new Map();
+  yearRows.forEach(d => {
+    const dt = new Date(d.date);
+    const m = dt.getUTCMonth()+1;
+    if(!map.has(m)) map.set(m, { ...ZERO });
+    map.set(m, addRec(map.get(m), d));
+  });
+  const monthLabels = lang === 'en' ? MONTH_LABELS_EN : MONTH_LABELS_BN;
+  return Array.from(map.entries()).sort((a,b)=>a[0]-b[0]).map(([m,v]) => ({ period: m, label: monthLabels[m-1], ...v }));
+}
+function populateYearToggle(){
+  const years = Array.from(new Set(dghsDailySeries.map(d => Number(d.date.slice(0,4))))).sort();
+  const box = document.getElementById('yearToggle');
+  box.innerHTML = years.map(y => `<button data-y="${y}" class="${selectedYears.has(y)?'active':''}">${y}</button>`).join('');
+  box.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const y = Number(b.dataset.y);
+    if(selectedYears.has(y)){ if(selectedYears.size > 1) selectedYears.delete(y); }
+    else selectedYears.add(y);
+    b.classList.toggle('active', selectedYears.has(y));
+    renderTrendChart();
+  }));
 }
 
 function sumBetween(series, startDate, endDate){
@@ -416,11 +486,13 @@ function renderCards(){
       <div class="card-sub">${yagoV.toLocaleString()} <span data-bn>ছিল গত বছর</span><span data-en>last year</span></div>
     </div>`);
   }
-  cards.push(`<div class="card">
-    <div class="card-label"><span data-bn>১ জানুয়ারি ${Y} থেকে অদ্যাবধি</span><span data-en>Since Jan 1, ${Y} (YTD)</span></div>
-    <div class="card-value">${ytdV.toLocaleString()}</div>
-    <div class="card-sub"><span data-bn>চলতি বছরের সঞ্চিত সংখ্যা</span><span data-en>cumulative this year</span></div>
-  </div>`);
+  if(currentGranularity !== 'yearly'){
+    cards.push(`<div class="card">
+      <div class="card-label"><span data-bn>১ জানুয়ারি ${Y} থেকে অদ্যাবধি</span><span data-en>Since Jan 1, ${Y} (YTD)</span></div>
+      <div class="card-value">${ytdV.toLocaleString()}</div>
+      <div class="card-sub"><span data-bn>চলতি বছরের সঞ্চিত সংখ্যা</span><span data-en>cumulative this year</span></div>
+    </div>`);
+  }
   cards.push(`<div class="card">
     <div class="card-label"><span data-bn>বাংলাদেশের মধ্যে হার</span><span data-en>Share of Bangladesh total</span></div>
     <div class="card-value" style="font-size:26px;">${fmtRate(rateBD)}</div>
@@ -434,77 +506,82 @@ function renderCards(){
 }
 
 /* ---------------- RENDER CHART ---------------- */
-function renderTrendChart(){
-  const container = document.getElementById('trendChart');
-  const points = aggregateSeries(dghsDailySeries, currentGranularity);
-  if(!points.length){ container.innerHTML = '<div class="state-msg">No trend data.</div>'; return; }
+function renderLinesChart(container, series, rangeEl){
   const W = 1000, H = 280, padL = 44, padR = 20, padT = 20, padB = 32;
-  const maxVal = Math.max(...points.map(p => p[currentMetric]), 1);
-  const stepX = (W - padL - padR) / Math.max(points.length - 1, 1);
+  const allPoints = series.flatMap(s => s.points);
+  if(!allPoints.length){ container.innerHTML = '<div class="state-msg">No trend data.</div>'; return; }
+  const maxVal = Math.max(...allPoints.map(p => p.y), 1);
+  const minX = Math.min(...allPoints.map(p => p.x));
+  const maxX = Math.max(...allPoints.map(p => p.x));
+  const spanX = Math.max(maxX - minX, 1);
+  const scaleX = x => padL + ((x - minX) / spanX) * (W - padL - padR);
   const scaleY = v => H - padB - (v / maxVal) * (H - padT - padB);
-  let path = '', area = '';
-  points.forEach((p, i) => {
-    const x = padL + i * stepX, y = scaleY(p[currentMetric]);
-    path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-    area += (i === 0 ? 'M' + x.toFixed(1) + ',' + (H-padB) + ' L' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-  });
-  area += `L${(padL+(points.length-1)*stepX).toFixed(1)},${H-padB} Z`;
+
   let gridlines = '';
   for(let g=0; g<=4; g++){ const y = padT + g*(H-padT-padB)/4; gridlines += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#D7DED8" stroke-width="1"/>`; }
-  const labelEvery = Math.max(Math.floor(points.length / 9), 1);
+
+  let paths = '';
+  series.forEach(s => {
+    if(!s.points.length) return;
+    let path = '';
+    s.points.forEach((p,i) => { const x = scaleX(p.x), y = scaleY(p.y); path += (i===0?'M':'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' '; });
+    paths += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  });
+
+  const ref = series.reduce((a,b)=> a.points.length>=b.points.length?a:b, series[0]);
+  const labelEvery = Math.max(Math.floor(ref.points.length / 9), 1);
   let xLabels = '';
-  points.forEach((p,i) => { if(i % labelEvery === 0 || i === points.length-1){ const x = padL + i * stepX; xLabels += `<text x="${x.toFixed(1)}" y="${H-10}" font-size="9" fill="#5B6E68" font-family="JetBrains Mono, monospace" text-anchor="middle">${p.label}</text>`; } });
-  const color = currentMetric === 'deaths' ? '#C13E36' : '#0E7C74';
-  const fill = currentMetric === 'deaths' ? '#C13E3620' : '#0E7C7420';
-  const metricLabelBn = currentMetric === 'deaths' ? 'মৃত্যু' : 'রোগী';
-  const metricLabelEn = currentMetric === 'deaths' ? 'Deaths' : 'Patients';
+  ref.points.forEach((p,i) => { if(i % labelEvery === 0 || i === ref.points.length-1){ xLabels += `<text x="${scaleX(p.x).toFixed(1)}" y="${H-10}" font-size="9" fill="#5B6E68" font-family="JetBrains Mono, monospace" text-anchor="middle">${p.label}</text>`; } });
+
+  const legend = series.map(s => `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;"><i style="width:10px;height:10px;border-radius:3px;background:${s.color};display:inline-block;"></i>${s.name}</span>`).join('');
 
   container.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--muted);font-family:var(--font-mono);">${legend}</div>
     <div style="position:relative;">
       <svg id="trendSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;display:block;">
         ${gridlines}
-        <path d="${area}" fill="${fill}" stroke="none"/>
-        <path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        ${paths}
         ${xLabels}
-        <g id="hoverLayer" style="display:none;">
-          <line id="hoverLine" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="${color}" stroke-width="1" stroke-dasharray="3,3"/>
-          <circle id="hoverDot" r="4" fill="${color}" stroke="#fff" stroke-width="1.5"/>
-        </g>
+        <g id="hoverLayer" style="display:none;"><line id="hoverLine" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="#5B6E68" stroke-width="1" stroke-dasharray="3,3"/></g>
         <rect id="chartOverlay" x="${padL}" y="${padT}" width="${Math.max(W-padL-padR,1)}" height="${Math.max(H-padT-padB,1)}" fill="transparent" style="cursor:crosshair;"/>
       </svg>
-      <div id="chartTooltip" style="position:absolute;display:none;pointer-events:none;background:var(--ink);color:#fff;font-family:var(--font-body);font-size:13.5px;line-height:1.5;padding:8px 12px;border-radius:10px;white-space:nowrap;transform:translate(-50%,-125%);z-index:5;box-shadow:0 6px 18px rgba(18,42,44,.35);font-variant-numeric:tabular-nums;"></div>
+      <div id="chartTooltip" style="position:absolute;display:none;pointer-events:none;background:var(--ink);color:#fff;font-family:var(--font-body);font-size:12.5px;line-height:1.6;padding:8px 12px;border-radius:10px;white-space:nowrap;transform:translate(-50%,-112%);z-index:5;box-shadow:0 6px 18px rgba(18,42,44,.35);font-variant-numeric:tabular-nums;"></div>
     </div>`;
 
   const svgEl = document.getElementById('trendSvg');
   const overlay = document.getElementById('chartOverlay');
   const hoverLayer = document.getElementById('hoverLayer');
   const hoverLine = document.getElementById('hoverLine');
-  const hoverDot = document.getElementById('hoverDot');
   const tooltip = document.getElementById('chartTooltip');
   const wrapperEl = svgEl.parentElement;
-  const lang = document.body.getAttribute('data-lang');
 
+  function nearestPoint(refX){
+    let best = null, bestD = Infinity;
+    ref.points.forEach(p => { const d = Math.abs(p.x - refX); if(d < bestD){ bestD = d; best = p; } });
+    return best;
+  }
   function handleMove(evt){
     const rect = svgEl.getBoundingClientRect();
     if(rect.width === 0) return;
     const scaleFactor = W / rect.width;
     const clientX = (evt.touches ? evt.touches[0].clientX : evt.clientX);
     const xInSvg = (clientX - rect.left) * scaleFactor;
-    let idx = Math.round((xInSvg - padL) / stepX);
-    idx = Math.max(0, Math.min(points.length - 1, idx));
-    const p = points[idx];
-    const px = padL + idx * stepX;
-    const py = scaleY(p[currentMetric]);
+    const refX = minX + ((xInSvg - padL) / (W-padL-padR)) * spanX;
+    const nearest = nearestPoint(refX);
+    if(!nearest) return;
+    const px = scaleX(nearest.x);
     hoverLine.setAttribute('x1', px); hoverLine.setAttribute('x2', px);
-    hoverDot.setAttribute('cx', px); hoverDot.setAttribute('cy', py);
     hoverLayer.style.display = '';
     tooltip.style.display = '';
-    const curLang = document.body.getAttribute('data-lang');
-    const mLabel = curLang === 'en' ? metricLabelEn : metricLabelBn;
-    tooltip.innerHTML = `<div style="font-family:var(--font-mono);font-size:10.5px;color:#9FC9C4;letter-spacing:.03em;margin-bottom:3px;">${p.label} · ${mLabel}</div><div style="font-family:var(--font-display);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;">${p[currentMetric].toLocaleString()}</div>`;
+    let rows = '';
+    series.forEach(s => {
+      const p = s.points.find(pp => pp.x === nearest.x);
+      if(p) rows += `<div><span style="color:${s.color};">●</span> ${s.name}: <b>${p.y.toLocaleString()}</b></div>`;
+    });
+    tooltip.innerHTML = `<div style="font-family:var(--font-mono);font-size:10.5px;color:#9FC9C4;margin-bottom:3px;">${nearest.label}</div>${rows}`;
     const wrapperRect = wrapperEl.getBoundingClientRect();
     tooltip.style.left = (rect.left - wrapperRect.left + px / scaleFactor) + 'px';
-    tooltip.style.top = (rect.top - wrapperRect.top + py / scaleFactor) + 'px';
+    tooltip.style.top = (rect.top - wrapperRect.top + scaleY(nearest.y) / scaleFactor) + 'px';
   }
   function handleLeave(){ hoverLayer.style.display = 'none'; tooltip.style.display = 'none'; }
   overlay.addEventListener('mousemove', handleMove);
@@ -512,7 +589,33 @@ function renderTrendChart(){
   overlay.addEventListener('touchmove', handleMove, {passive:true});
   overlay.addEventListener('touchend', handleLeave);
 
-  document.getElementById('trendRange').innerText = points[0].label + ' → ' + points[points.length-1].label;
+  if(rangeEl && ref.points.length){
+    rangeEl.innerText = ref.points[0].label + ' → ' + ref.points[ref.points.length-1].label;
+  }
+}
+
+function renderTrendChart(){
+  const container = document.getElementById('trendChart');
+  const rangeEl = document.getElementById('trendRange');
+  const lang = document.body.getAttribute('data-lang') || 'bn';
+  const metricLabel = currentMetric === 'deaths' ? {bn:'মৃত্যু',en:'Deaths'}[lang] : {bn:'রোগী',en:'Patients'}[lang];
+  const metricColor = currentMetric === 'deaths' ? '#C13E36' : '#0E7C74';
+
+  if(currentGranularity === 'yearly'){
+    const points = aggregateSeries(dghsDailySeries, 'yearly');
+    const series = [{ name: metricLabel, color: metricColor,
+      points: points.map((p,i) => ({ x:i, y:p[currentMetric], label:p.label })) }];
+    renderLinesChart(container, series, rangeEl);
+    return;
+  }
+  const years = Array.from(selectedYears).sort();
+  if(!years.length){ container.innerHTML = '<div class="state-msg">Select at least one year.</div>'; return; }
+  const series = years.map((y,idx) => {
+    const pts = buildYearSeries(y, currentGranularity, lang);
+    return { name: String(y), color: YEAR_COLORS[idx % YEAR_COLORS.length],
+      points: pts.map(p => ({ x: p.period, y: p[currentMetric], label: p.label })) };
+  });
+  renderLinesChart(container, series, rangeEl);
 }
 
 function renderAll(){ renderCards(); renderTrendChart(); }
@@ -521,6 +624,7 @@ document.querySelectorAll('#granToggle button').forEach(b => b.addEventListener(
   document.querySelectorAll('#granToggle button').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   currentGranularity = b.dataset.g;
+  document.getElementById('yearFilterBlock').style.display = currentGranularity === 'yearly' ? 'none' : '';
   renderAll();
 }));
 document.querySelectorAll('#metricToggle button').forEach(b => b.addEventListener('click', () => {
@@ -569,6 +673,8 @@ async function loadDashboard(){
     dghsDailySeries = Array.from(byDate.entries()).map(([date, v]) => ({ date, ...v })).sort((a,b)=>a.date.localeCompare(b.date));
     lastDate = new Date(dghsDailySeries[dghsDailySeries.length - 1].date);
     const currentYear = lastDate.getFullYear();
+    selectedYears = new Set([currentYear]);
+    populateYearToggle();
 
     document.getElementById('asofLine').innerHTML =
       `<span data-bn>সর্বশেষ হালনাগাদ (${currentYear}):</span><span data-en>Last updated (${currentYear}):</span> ${dghsDailySeries[dghsDailySeries.length-1].date}`;
@@ -590,30 +696,33 @@ const WARDS_GEOJSON = {"type":"FeatureCollection","features":[{"type":"Feature",
 </script>
 <script>
 
-/* ================= Ward risk map ================= */
+/* ================= Ward risk map + ranking table ================= */
 const RISK_SHEET = {
   bn: { id: '1zEaxK5CyBCa_TxmFYjjcnsAQ3bxxrecfMGiKJ7gqXAU', tab: 'zone_ward_patient_death_larv_mosq_risk' },
   en: { id: '1EdVgB-WUZIFtjMznhnriTPZ5_HfMQkYQPZI84bR2M8A', tab: 'zone_ward_patient_death_larv_mosq_risk' }
 };
 /* Same column layout in both sheets (English sheet just drops the _bn suffix) */
 const RCOL = {
-  DATE:'A', YEAR:'B', WEEK:'D', WARD:'H',
-  TOTAL_PATIENT:'M', TOTAL_DEATH:'N',
-  ROLL_PATIENT:'T', ROLL_DEATH:'U',
-  RISK_CAT:'AP', SUMMARY:'AQ'
+  DATE:'A', YEAR:'B', WEEK:'D', ZONE:'G', WARD:'H', WARDFC:'I', AREA:'J', POP_DEN:'L',
+  TOTAL_PATIENT:'M', TOTAL_DEATH:'N', MOSQ:'P', BI:'Q', CI:'R', HI:'S',
+  ROLL_PATIENT:'T', ROLL_DEATH:'U', ROLL_MOSQ:'V', ROLL_BI:'W', ROLL_CI:'X', ROLL_HI:'Y',
+  COMPOSITE:'AG', RISK_CAT:'AP', SUMMARY:'AQ'
 };
 const RISK_STYLE = {
-  'বেশি':  { key:'high', color:'#C13E36' },
-  'High':  { key:'high', color:'#C13E36' },
-  'মাঝারি':{ key:'med',  color:'#D9A412' },
-  'Moderate':{ key:'med', color:'#D9A412' },
-  'কম':    { key:'low',  color:'#2E8E5B' },
-  'Low':   { key:'low',  color:'#2E8E5B' }
+  'বেশি':  { key:'high', color:'#C13E36' }, 'High':    { key:'high', color:'#C13E36' },
+  'মাঝারি':{ key:'med',  color:'#D9A412' }, 'Moderate':{ key:'med',  color:'#D9A412' },
+  'কম':    { key:'low',  color:'#2E8E5B' }, 'Low':     { key:'low',  color:'#2E8E5B' }
 };
 const NODATA_STYLE = { key:'nodata', color:'#C7CFCD' };
+const RISK_LABELS = {
+  high:  { bn:'বেশি',      en:'High' },
+  med:   { bn:'মাঝারি',    en:'Moderate' },
+  low:   { bn:'কম',        en:'Low' },
+  nodata:{ bn:'তথ্য নেই',  en:'No data' }
+};
 
-let mapMetric = 'patients'; // 'patients' | 'deaths'
 let riskMap = null, riskGeoLayer = null, riskWardData = {};
+let selectedRiskDate = null;
 
 function gvizUrl(sheetId, tab, query){
   const params = new URLSearchParams({ sheet: tab, tq: query });
@@ -642,20 +751,26 @@ function rGvizDateToISO(v){
   return null;
 }
 function rRowsFromTable(table){ return table.rows.map(r => r.c.map(c => c ? c.v : null)); }
+function fmtVal(v){
+  if(v === null || v === undefined || v === '' || v === 'NA') return '—';
+  if(typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+  return String(v);
+}
 
-async function fetchRiskSnapshot(lang){
+async function fetchDateBounds(lang){
   const src = RISK_SHEET[lang] || RISK_SHEET.bn;
-  const q1 = `select ${RCOL.DATE}, ${RCOL.YEAR}, ${RCOL.WEEK} order by ${RCOL.DATE} desc limit 1`;
-  const t1 = await runRiskQuery(src.id, src.tab, q1);
-  const r1 = rRowsFromTable(t1)[0];
-  if(!r1) throw new Error('no rows');
-  const isoDate = rGvizDateToISO(r1[0]);
-  const year = r1[1], week = r1[2];
-  if(!isoDate) throw new Error('bad date');
+  const t = await runRiskQuery(src.id, src.tab, `select min(${RCOL.DATE}), max(${RCOL.DATE})`);
+  const row = rRowsFromTable(t)[0];
+  return { min: rGvizDateToISO(row[0]), max: rGvizDateToISO(row[1]) };
+}
 
-  const q2 = `select ${RCOL.WARD}, ${RCOL.TOTAL_PATIENT}, ${RCOL.TOTAL_DEATH}, ${RCOL.ROLL_PATIENT}, ${RCOL.ROLL_DEATH}, ${RCOL.RISK_CAT}, ${RCOL.SUMMARY} where ${RCOL.DATE} = date '${isoDate}'`;
+async function fetchRiskSnapshot(lang, isoDate){
+  const src = RISK_SHEET[lang] || RISK_SHEET.bn;
+  const q2 = `select ${RCOL.WARD}, ${RCOL.YEAR}, ${RCOL.WEEK}, ${RCOL.POP_DEN}, ${RCOL.TOTAL_PATIENT}, ${RCOL.TOTAL_DEATH}, ${RCOL.MOSQ}, ${RCOL.BI}, ${RCOL.CI}, ${RCOL.HI}, ${RCOL.ROLL_PATIENT}, ${RCOL.ROLL_DEATH}, ${RCOL.ROLL_MOSQ}, ${RCOL.ROLL_BI}, ${RCOL.ROLL_CI}, ${RCOL.ROLL_HI}, ${RCOL.COMPOSITE}, ${RCOL.RISK_CAT}, ${RCOL.SUMMARY} where ${RCOL.DATE} = date '${isoDate}'`;
   const t2 = await runRiskQuery(src.id, src.tab, q2);
   const rows2 = rRowsFromTable(t2);
+  if(!rows2.length) throw new Error('no data for that date');
+  const year = rows2[0][1], week = rows2[0][2];
 
   const q3 = `select ${RCOL.WARD}, sum(${RCOL.TOTAL_PATIENT}), sum(${RCOL.TOTAL_DEATH}) where ${RCOL.YEAR} = ${year} and ${RCOL.WEEK} = ${week} group by ${RCOL.WARD}`;
   const t3 = await runRiskQuery(src.id, src.tab, q3);
@@ -667,15 +782,25 @@ async function fetchRiskSnapshot(lang){
     const ward = String(r[0]);
     const wk = weekMap[ward] || { patient:0, death:0 };
     out[ward] = {
-      todayPatient: r[1]||0, todayDeath: r[2]||0,
-      roll3Patient: r[3]||0, roll3Death: r[4]||0,
-      weekPatient: wk.patient, weekDeath: wk.death,
-      risk: (r[5]||'').trim(), summary: r[6]||''
+      popDen: r[3], todayPatient: r[4]||0, todayDeath: r[5]||0,
+      mosq: r[6], bi: r[7], ci: r[8], hi: r[9],
+      roll3Patient: r[10]||0, roll3Death: r[11]||0,
+      rollMosq: r[12], rollBi: r[13], rollCi: r[14], rollHi: r[15],
+      composite: r[16], risk: (r[17]||'').trim(), summary: r[18]||'',
+      weekPatient: wk.patient, weekDeath: wk.death
     };
   });
-  return { data: out, isoDate };
+  return out;
 }
 
+async function fetchRanking(lang, isoDate){
+  const src = RISK_SHEET[lang] || RISK_SHEET.bn;
+  const q = `select ${RCOL.ZONE}, ${RCOL.WARD}, ${RCOL.WARDFC}, ${RCOL.AREA}, ${RCOL.COMPOSITE}, ${RCOL.RISK_CAT} where ${RCOL.DATE} = date '${isoDate}' order by ${RCOL.COMPOSITE} desc`;
+  const t = await runRiskQuery(src.id, src.tab, q);
+  return rRowsFromTable(t).map(r => ({ zone:r[0], ward:r[1], wardfc:r[2], area:r[3], composite:r[4], risk:(r[5]||'').trim() }));
+}
+
+/* ===== Map rendering ===== */
 function riskStyleForWard(wardNo){
   const d = riskWardData[wardNo];
   const st = d ? (RISK_STYLE[d.risk] || NODATA_STYLE) : NODATA_STYLE;
@@ -686,30 +811,60 @@ function riskPopupHtml(wardNo, props){
   const d = riskWardData[wardNo];
   const lang = document.body.getAttribute('data-lang') || 'bn';
   const st = d ? (RISK_STYLE[d.risk] || NODATA_STYLE) : NODATA_STYLE;
-  const riskLabel = { high:{bn:'বেশি ঝুঁকি',en:'High risk'}, med:{bn:'মাঝারি ঝুঁকি',en:'Moderate risk'},
-                       low:{bn:'কম ঝুঁকি',en:'Low risk'}, nodata:{bn:'তথ্য নেই',en:'No data'} }[st.key][lang];
-  const today = d ? (mapMetric==='patients' ? d.todayPatient : d.todayDeath) : '—';
-  const week  = d ? (mapMetric==='patients' ? d.weekPatient  : d.weekDeath)  : '—';
-  const roll3 = d ? (mapMetric==='patients' ? d.roll3Patient : d.roll3Death) : '—';
-  const modeLabel = mapMetric==='patients' ? {bn:'রোগী',en:'Patients'}[lang] : {bn:'মৃত্যু',en:'Deaths'}[lang];
-  const summary = d ? d.summary : {bn:'এই ওয়ার্ডের জন্য তথ্য পাওয়া যায়নি।', en:'No data available for this ward.'}[lang];
+  const riskLabel = RISK_LABELS[st.key][lang];
   const wardLabel = lang === 'en' ? 'Ward' : 'ওয়ার্ড নং';
-  const rows = lang === 'en'
-    ? [['Today', today], ['This week', week], ['Last 3 weeks', roll3]]
-    : [['আজ', today], ['এই সপ্তাহে', week], ['গত ৩ সপ্তাহে', roll3]];
+  const L = lang === 'en'
+    ? { dri:'Dengue Risk Index', patients:'Patients', deaths:'Deaths', today:'Today', week:'This week', roll3:'Last 3 weeks',
+        mosq:'Mosquito indices', biL:'BI (last week)', ciL:'CI (last week)', hiL:'HI (last week)',
+        bi3:'BI (3-wk avg)', ci3:'CI (3-wk avg)', hi3:'HI (3-wk avg)',
+        mosqL:'Adult mosquito, per trap (last week)', mosq3:'Adult mosquito, per trap (3-wk avg)',
+        popden:'Population density (per sq.km)', nodata:'No data available for this ward.' }
+    : { dri:'ডেঙ্গু ঝুঁকি সূচক', patients:'রোগী', deaths:'মৃত্যু', today:'আজ', week:'এই সপ্তাহে', roll3:'গত ৩ সপ্তাহে',
+        mosq:'মশা সূচক', biL:'BI (গত সপ্তাহ)', ciL:'CI (গত সপ্তাহ)', hiL:'HI (গত সপ্তাহ)',
+        bi3:'BI (৩ সপ্তাহের গড়)', ci3:'CI (৩ সপ্তাহের গড়)', hi3:'HI (৩ সপ্তাহের গড়)',
+        mosqL:'প্রাপ্তবয়স্ক মশা, প্রতি ট্র্যাপ (গত সপ্তাহ)', mosq3:'প্রাপ্তবয়স্ক মশা, প্রতি ট্র্যাপ (৩ সপ্তাহের গড়)',
+        popden:'জনসংখ্যার ঘনত্ব (প্রতি বর্গকিমি)', nodata:'এই ওয়ার্ডের জন্য তথ্য পাওয়া যায়নি।' };
+  if(!d){
+    return `<div class="ward-popup"><h4>${wardLabel} ${props.Ward_no || wardNo}</h4><div class="summary">${L.nodata}</div></div>`;
+  }
   return `
     <div class="ward-popup">
       <h4>${wardLabel} ${props.Ward_no || wardNo}</h4>
+      <div class="section-label">${L.dri}</div>
       <span class="badge" style="background:${st.color}">${riskLabel}</span>
-      <div class="summary">${summary}</div>
-      <table>${rows.map(([k,v]) => `<tr><td class="k">${k} (${modeLabel})</td><td class="v">${v}</td></tr>`).join('')}</table>
+      <div class="summary">${d.summary}</div>
+      <div class="section-label">${L.patients}</div>
+      <table>
+        <tr><td class="k">${L.today}</td><td class="v">${fmtVal(d.todayPatient)}</td></tr>
+        <tr><td class="k">${L.week}</td><td class="v">${fmtVal(d.weekPatient)}</td></tr>
+        <tr><td class="k">${L.roll3}</td><td class="v">${fmtVal(d.roll3Patient)}</td></tr>
+      </table>
+      <div class="section-label">${L.deaths}</div>
+      <table>
+        <tr><td class="k">${L.today}</td><td class="v">${fmtVal(d.todayDeath)}</td></tr>
+        <tr><td class="k">${L.week}</td><td class="v">${fmtVal(d.weekDeath)}</td></tr>
+        <tr><td class="k">${L.roll3}</td><td class="v">${fmtVal(d.roll3Death)}</td></tr>
+      </table>
+      <div class="section-label">${L.mosq}</div>
+      <table>
+        <tr><td class="k">${L.biL}</td><td class="v">${fmtVal(d.bi)}</td></tr>
+        <tr><td class="k">${L.ciL}</td><td class="v">${fmtVal(d.ci)}</td></tr>
+        <tr><td class="k">${L.hiL}</td><td class="v">${fmtVal(d.hi)}</td></tr>
+        <tr><td class="k">${L.bi3}</td><td class="v">${fmtVal(d.rollBi)}</td></tr>
+        <tr><td class="k">${L.ci3}</td><td class="v">${fmtVal(d.rollCi)}</td></tr>
+        <tr><td class="k">${L.hi3}</td><td class="v">${fmtVal(d.rollHi)}</td></tr>
+        <tr><td class="k">${L.mosqL}</td><td class="v">${fmtVal(d.mosq)}</td></tr>
+        <tr><td class="k">${L.mosq3}</td><td class="v">${fmtVal(d.rollMosq)}</td></tr>
+      </table>
+      <div class="section-label">${L.popden}</div>
+      <table><tr><td class="k">${L.popden}</td><td class="v">${fmtVal(d.popDen)}</td></tr></table>
     </div>`;
 }
 
 function initRiskMap(){
   riskMap = L.map('riskMap', { scrollWheelZoom: true }).setView([23.815, 90.40], 11.3);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO', maxZoom: 19
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
   }).addTo(riskMap);
 
   riskGeoLayer = L.geoJSON(WARDS_GEOJSON, {
@@ -717,7 +872,7 @@ function initRiskMap(){
     onEachFeature: (feature, layer) => {
       const wardNo = String(feature.properties.ward || feature.properties.Ward_no);
       layer.bindTooltip(`Ward ${feature.properties.Ward_no}`, { className:'ward-tip', sticky:true });
-      layer.bindPopup(() => riskPopupHtml(wardNo, feature.properties), { maxWidth: 300 });
+      layer.bindPopup(() => riskPopupHtml(wardNo, feature.properties), { maxWidth: 300, maxHeight: 380 });
       layer.on('mouseover', () => layer.setStyle({ weight: 2.6 }));
       layer.on('mouseout', () => layer.setStyle({ weight: 1.3 }));
     }
@@ -734,16 +889,47 @@ function refreshRiskStyles(){
   });
 }
 
+/* ===== Ranking table ===== */
+function renderRankTable(rows, lang){
+  const table = document.getElementById('rankTable');
+  const headers = lang === 'en'
+    ? ['Rank','Ward','Zone','Area','Risk Index']
+    : ['র‍্যাংক','ওয়ার্ড','অঞ্চল','এলাকা','ঝুঁকি সূচক'];
+  const thead = `<thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>`;
+  const body = rows.map((r,i) => {
+    const st = RISK_STYLE[r.risk] || NODATA_STYLE;
+    const label = RISK_LABELS[st.key][lang];
+    return `<tr>
+      <td class="rank-cell">${i+1}</td>
+      <td class="ward-cell">${r.wardfc || r.ward}</td>
+      <td>${r.zone != null ? r.zone : '—'}</td>
+      <td>${r.area || '—'}</td>
+      <td class="badge-cell"><span style="background:${st.color}">${label}</span></td>
+    </tr>`;
+  }).join('');
+  table.innerHTML = thead + `<tbody>${body}</tbody>`;
+}
+
+/* ===== Load pipeline ===== */
 async function loadRiskMap(lang){
   const loading = document.getElementById('mapLoading');
   loading.style.display = 'flex';
   try{
-    const { data, isoDate } = await fetchRiskSnapshot(lang);
-    riskWardData = data;
-    const label = lang === 'en' ? 'Latest data:' : 'সর্বশেষ তথ্য:';
-    document.getElementById('mapUpdated').textContent = `${label} ${isoDate}`;
-    document.getElementById('mapWeekRange').textContent = isoDate;
+    if(!selectedRiskDate){
+      const bounds = await fetchDateBounds(lang);
+      selectedRiskDate = bounds.max;
+      const input = document.getElementById('riskDateFilter');
+      input.min = bounds.min; input.max = bounds.max; input.value = bounds.max;
+    }
+    const [snapshot, ranking] = await Promise.all([
+      fetchRiskSnapshot(lang, selectedRiskDate),
+      fetchRanking(lang, selectedRiskDate)
+    ]);
+    riskWardData = snapshot;
+    const label = lang === 'en' ? 'Showing data for:' : 'তথ্য দেখানো হচ্ছে:';
+    document.getElementById('mapUpdated').textContent = `${label} ${selectedRiskDate}`;
     refreshRiskStyles();
+    renderRankTable(ranking, lang);
   } catch(err){
     console.error(err);
     const msg = lang === 'en'
@@ -759,12 +945,11 @@ function onLangChangeForMap(lang){
   loadRiskMap(lang);
 }
 
-document.querySelectorAll('#mapMetricToggle button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('#mapMetricToggle button').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  mapMetric = b.dataset.mm;
-  refreshRiskStyles();
-}));
+document.getElementById('riskDateFilter').addEventListener('change', (e) => {
+  if(!e.target.value) return;
+  selectedRiskDate = e.target.value;
+  loadRiskMap(document.body.getAttribute('data-lang') || 'bn');
+});
 
 initRiskMap();
 loadRiskMap(document.body.getAttribute('data-lang') || 'bn');
